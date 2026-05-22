@@ -7,6 +7,7 @@ import tempfile
 from ba_streamlit_app import (
     choose_generation_upload,
     prepare_downloads,
+    requires_manual_process_for_customer_final,
     run_ba_workflow,
     save_uploaded_file,
 )
@@ -110,7 +111,7 @@ def render_cloud_app() -> None:
     with tab_generate:
         point_file = st.file_uploader("原始点位表", type=["xlsx"], key="cloud_point_file")
         process_file = st.file_uploader(
-            "人工配置过程文档（可选，推荐用于匹配最终报价）",
+            "人工配置过程文档（匹配客户最终报价时必填）",
             type=["xlsx"],
             key="cloud_process_file_generate",
         )
@@ -128,10 +129,10 @@ def render_cloud_app() -> None:
         if st.button("生成文件", type="primary", key="cloud_generate_all"):
             if not point_file:
                 st.error("请先上传原始点位表。")
+            elif requires_manual_process_for_customer_final(process_file, quote_style):
+                st.error("要匹配客户最终报价，请同时上传人工配置过程文档。只上传原始点位表会按自动优化数量计算，结果可能偏低。")
             else:
                 workflow_file = choose_generation_upload(point_file, process_file)
-                if process_file is None and quote_style == "customer-final":
-                    st.warning("未上传人工配置过程文档，本次会按原始点位自动优化模块数量，报价可能与人工最终报价不同。")
                 with st.spinner("正在生成，请稍候..."):
                     try:
                         downloads, zip_buffer = run_cloud_uploaded_generation(
