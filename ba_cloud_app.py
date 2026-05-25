@@ -5,7 +5,9 @@ from pathlib import Path
 import tempfile
 
 from ba_streamlit_app import (
+    GENERATION_OPTIONS,
     choose_generation_upload,
+    generation_settings_from_label,
     prepare_downloads,
     requires_manual_process_for_customer_final,
     run_ba_workflow,
@@ -123,8 +125,8 @@ def render_cloud_app() -> None:
         with col_tag:
             tag = st.selectbox("传感器品牌", ["国产", "进口"], key="cloud_tag_generate")
 
-        quote_style_label = st.selectbox("报价口径", list(QUOTE_STYLE_OPTIONS), key="cloud_quote_style_generate")
-        quote_style = quote_style_from_label(quote_style_label)
+        generation_label = st.selectbox("生成内容", list(GENERATION_OPTIONS), key="cloud_quote_style_generate")
+        generation_mode, quote_style = generation_settings_from_label(generation_label)
 
         if st.button("生成文件", type="primary", key="cloud_generate_all"):
             if not point_file:
@@ -138,7 +140,7 @@ def render_cloud_app() -> None:
                         downloads, zip_buffer = run_cloud_uploaded_generation(
                             input_upload=workflow_file,
                             price_upload=price_file,
-                            mode="all",
+                            mode=generation_mode,
                             k=k_value,
                             tag=tag,
                             input_filename="配置输入文档",

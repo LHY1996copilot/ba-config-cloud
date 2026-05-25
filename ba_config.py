@@ -1135,17 +1135,17 @@ def run(args: argparse.Namespace) -> list[Path]:
     written: list[Path] = []
 
     project_data: ProjectData | None = None
-    if args.mode in {"ddc", "list", "all"}:
+    if args.mode in {"ddc", "list", "config", "all"}:
         project_data = parse_project(args.input, reserve_factor=args.k, ddc_source=args.ddc_source)
 
-    if args.mode in {"ddc", "all"}:
+    if args.mode in {"ddc", "config", "all"}:
         assert project_data is not None
         path = output_dir / "DDC配置文档.xlsx"
         write_ddc_workbook(project_data, path)
         written.append(path)
 
     list_path = output_dir / "清单文档.xlsx"
-    if args.mode in {"list", "all"}:
+    if args.mode in {"list", "config", "all"}:
         assert project_data is not None
         write_list_workbook(project_data, list_path)
         written.append(list_path)
@@ -1176,7 +1176,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--price", required=True, help="价格参考表路径")
     parser.add_argument("--k", required=True, type=float, default=1.1, help="K值系数")
     parser.add_argument("--tag", required=True, choices=["国产", "进口"], default="国产", help="传感器品牌偏好")
-    parser.add_argument("--mode", required=True, choices=["ddc", "list", "quote", "all"], default="all", help="输出模式")
+    parser.add_argument("--mode", required=True, choices=["ddc", "list", "config", "quote", "all"], default="all", help="输出模式")
     parser.add_argument("--output-dir", default=".", help="输出目录，默认当前目录")
     parser.add_argument(
         "--quote-style",

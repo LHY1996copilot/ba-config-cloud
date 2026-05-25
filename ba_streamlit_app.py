@@ -13,6 +13,11 @@ from ba_config import run as run_cli_workflow
 OUTPUT_ORDER = ["DDC配置文档.xlsx", "清单文档.xlsx", "报价文档.xlsx"]
 DEFAULT_PRICE_FILENAME = "价格参考表0520.xlsx"
 WEB_OUTPUT_ROOT = Path(__file__).resolve().parent / "ba_config_outputs" / "web"
+GENERATION_OPTIONS = {
+    "只生成 DDC / 清单（不生成报价）": ("config", "reference"),
+    "客户最终报价口径": ("all", "customer-final"),
+    "价格参考表完整报价": ("all", "reference"),
+}
 
 
 def find_default_price_file() -> Path | None:
@@ -110,6 +115,10 @@ def choose_generation_upload(point_upload, process_upload):
     return process_upload if process_upload is not None else point_upload
 
 
+def generation_settings_from_label(label: str) -> tuple[str, str]:
+    return GENERATION_OPTIONS[label]
+
+
 def requires_manual_process_for_customer_final(process_upload, quote_style: str) -> bool:
     return quote_style == "customer-final" and process_upload is None
 
@@ -134,18 +143,18 @@ def render_app() -> None:
             type=["xlsx"],
             key="process_file_generate",
         )
-        price_file = st.file_uploader("价格参考表（可选）", type=["xlsx"], key="price_file_generate")
+        price_file = st.file_uploader("价格参考表（完整报价口径时必填）", type=["xlsx"], key="price_file_generate")
         col_k, col_tag = st.columns(2)
         with col_k:
             k_value = st.number_input("K值", min_value=1.0, max_value=2.0, value=1.1, step=0.05, format="%.2f")
         with col_tag:
             tag = st.selectbox("传感器品牌", ["国产", "进口"], key="tag_generate")
-        quote_style_label = st.selectbox(
-            "报价口径",
-            ["客户最终报价口径", "价格参考表完整报价"],
+        generation_label = st.selectbox(
+            "生成内容",
+            list(GENERATION_OPTIONS),
             key="quote_style_generate",
         )
-        quote_style = "customer-final" if quote_style_label == "客户最终报价口径" else "reference"
+        generation_mode, quote_style = generation_settings_from_label(generation_label)
 
         if st.button("生成文件", type="primary", key="generate_all"):
             if not point_file:
@@ -159,7 +168,7 @@ def render_app() -> None:
                         downloads, zip_buffer, saved_dir = _run_uploaded_generation(
                             workflow_file,
                             price_file,
-                            mode="all",
+                            mode=generation_mode,
                             k=k_value,
                             tag=tag,
                             point_filename="配置输入文档",
