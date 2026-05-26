@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from io import BytesIO
 from pathlib import Path
 import tempfile
@@ -12,6 +13,7 @@ from ba_streamlit_app import (
 
 
 SIMPLE_OUTPUT_NAMES = {"清单文档.xlsx", "报价文档.xlsx"}
+PRICE_REFERENCE_SECRET = "PRICE_REFERENCE_XLSX_BASE64"
 
 
 QUOTE_STYLE_OPTIONS = {
@@ -59,20 +61,34 @@ def run_cloud_uploaded_generation(
         return prepare_downloads(files)
 
 
-def run_simple_uploaded_generation(input_upload, k: float, tag: str) -> tuple[list[tuple[str, bytes]], BytesIO]:
+def save_price_reference_from_base64(price_base64: str | None, folder: Path) -> Path:
+    if not price_base64:
+        raise FileNotFoundError("后台价格表未配置，请联系管理员更新价格参考表。")
+    path = folder / "价格参考表.xlsx"
+    path.write_bytes(base64.b64decode("".join(str(price_base64).split())))
+    return path
+
+
+def run_simple_uploaded_generation(
+    input_upload,
+    k: float,
+    tag: str,
+    price_base64: str | None = None,
+) -> tuple[list[tuple[str, bytes]], BytesIO]:
     with tempfile.TemporaryDirectory() as tmp:
         work_dir = Path(tmp)
         input_path = save_uploaded_file(input_upload, work_dir, "原始点位表")
+        price_path = save_price_reference_from_base64(price_base64, work_dir)
         output_dir = work_dir / "outputs"
         output_dir.mkdir()
         files = run_ba_workflow(
             input_file=input_path,
-            price_file=None,
+            price_file=price_path,
             mode="all",
             k=k,
             tag=tag,
             output_dir=output_dir,
-            quote_style="customer-final",
+            quote_style="reference",
         )
         customer_files = [path for path in files if path.name in SIMPLE_OUTPUT_NAMES]
         return prepare_downloads(customer_files)
@@ -139,7 +155,12 @@ def render_cloud_app() -> None:
         else:
             with st.spinner("正在生成，请稍候..."):
                 try:
-                    downloads, zip_buffer = run_simple_uploaded_generation(point_file, k_value, tag)
+                    downloads, zip_buffer = run_simple_uploaded_generation(
+                        point_file,
+                        k_value,
+                        tag,
+                        price_base64=st.secrets.get(PRICE_REFERENCE_SECRET, ""),
+                    )
                     st.session_state["cloud_generate_downloads"] = downloads
                     st.session_state["cloud_generate_zip"] = zip_buffer.getvalue()
                 except Exception as exc:

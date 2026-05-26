@@ -93,6 +93,23 @@ DDC_HEADERS = [
 
 LIST_HEADERS = ["序号", "产品名称", "品牌", "型号", "技术规格", "数量", "含税单价", "含税总价"]
 EXTRA_SENSOR_HEADERS = {"风道CO2", "室内CO2浓度"}
+SENSOR_PRICE_PRODUCT_ALIASES = {
+    "初效滤网过滤": "空气压差开关",
+    "中效滤网过滤": "空气压差开关",
+    "压差报警": "空气压差开关",
+    "风机压差检测": "空气压差开关",
+    "超高液位报警": "液位开关",
+    "超低液位报警": "液位开关",
+    "水位溢出报警": "液位开关",
+    "液位高/低报警": "液位开关",
+    "新风温度": "风管温度",
+    "送风温度": "风管温度",
+    "新风湿度": "风管温湿度",
+    "送风湿度": "风管温湿度",
+    "风道CO2": "风管二氧化碳",
+    "室内CO2浓度": "室内二氧化碳",
+    "投入式液位监测": "投入式液位",
+}
 
 
 def _num(value: Any) -> float:
@@ -940,6 +957,10 @@ class PriceBook:
     def sensor(self, product: str, preferred_tag: str) -> PriceRow | None:
         rows = self.by_product.get(_norm(product), [])
         if not rows:
+            mapped_product = SENSOR_PRICE_PRODUCT_ALIASES.get(product)
+            if mapped_product:
+                rows = self.by_product.get(_norm(mapped_product), [])
+        if not rows:
             return None
         for row in rows:
             if row.tag == preferred_tag:
@@ -1029,6 +1050,7 @@ def _apply_quote_prices(ws, price_book: PriceBook, preferred_tag: str) -> None:
         qty = _number_or_none(ws.cell(row, 6).value)
         if qty is None:
             continue
+        last_data_row = max(last_data_row, row)
 
         price_row = None
         if section == "软件":
@@ -1060,7 +1082,6 @@ def _apply_quote_prices(ws, price_book: PriceBook, preferred_tag: str) -> None:
         ws.cell(row, 5).value = price_row.spec
         ws.cell(row, 7).value = _intish(price_row.price)
         ws.cell(row, 8).value = f"=G{row}*F{row}"
-        last_data_row = max(last_data_row, row)
 
     total_row = last_data_row + 3
     ws.cell(total_row, 2).value = "总计"
