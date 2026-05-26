@@ -88,7 +88,7 @@ def run_simple_uploaded_generation(
             k=k,
             tag=tag,
             output_dir=output_dir,
-            quote_style="reference",
+            quote_style="customer-final",
         )
         customer_files = [path for path in files if path.name in SIMPLE_OUTPUT_NAMES]
         return prepare_downloads(customer_files)

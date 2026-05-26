@@ -839,7 +839,28 @@ def write_list_workbook(data: ProjectData, path: str | Path) -> None:
     _save_workbook(wb, path)
 
 
-def write_customer_final_quote_workbook(data: ProjectData, path: str | Path) -> None:
+def _customer_final_quote_prices(price_book: PriceBook | None) -> tuple[float, dict[str, float], float]:
+    gateway_price = CUSTOMER_FINAL_GATEWAY_PRICE
+    interface_price = CUSTOMER_FINAL_GATEWAY_PRICE
+    item_prices = dict(CUSTOMER_FINAL_MODULE_PRICES)
+    if price_book is None:
+        return gateway_price, item_prices, interface_price
+
+    gateway_row = price_book.by_tag.get("网关")
+    if gateway_row is not None:
+        gateway_price = gateway_row.price
+    interface_row = price_book.by_tag.get("接口")
+    if interface_row is not None:
+        interface_price = interface_row.price
+    for key in item_prices:
+        row = price_book.by_tag.get(key)
+        if row is not None:
+            item_prices[key] = row.price
+    return gateway_price, item_prices, interface_price
+
+
+def write_customer_final_quote_workbook(data: ProjectData, path: str | Path, price_book: PriceBook | None = None) -> None:
+    gateway_price, item_prices, interface_price = _customer_final_quote_prices(price_book)
     wb = Workbook()
     ws = wb.active
     ws.title = "报价文档"
@@ -857,10 +878,10 @@ def write_customer_final_quote_workbook(data: ProjectData, path: str | Path) -> 
     seq = 2
     row += 1
     for name, qty in data.interfaces:
-        ws.append([seq, name, _intish(qty), CUSTOMER_FINAL_GATEWAY_PRICE, None])
+        ws.append([seq, name, _intish(qty), _intish(interface_price), None])
         seq += 1
         row += 1
-    ws.append([seq, "网关接口", _intish(data.gateway_quantity), CUSTOMER_FINAL_GATEWAY_PRICE, f"=D{row}*C{row}"])
+    ws.append([seq, "网关接口", _intish(data.gateway_quantity), _intish(gateway_price), f"=D{row}*C{row}"])
     seq += 1
 
     row += 1
@@ -869,12 +890,12 @@ def write_customer_final_quote_workbook(data: ProjectData, path: str | Path) -> 
     modules = data.module_totals
     boxes = data.box_totals
     for key, _product, _model in MODULE_ROWS:
-        price = CUSTOMER_FINAL_MODULE_PRICES[key]
+        price = item_prices[key]
         ws.append([seq, key, _intish(modules.get(key, 0)), price, f"=D{row}*C{row}"])
         seq += 1
         row += 1
     for key, product, model in BOX_ROWS:
-        price = CUSTOMER_FINAL_MODULE_PRICES[key]
+        price = item_prices[key]
         ws.append([seq, f"{product} {model}", _intish(boxes.get(key, 0)), price, f"=D{row}*C{row}"])
         seq += 1
         row += 1
@@ -893,12 +914,16 @@ def write_customer_final_quote_workbook(data: ProjectData, path: str | Path) -> 
     _save_workbook(wb, path)
 
 
-def write_customer_final_quote_from_list(list_path: str | Path, output_path: str | Path) -> None:
+def write_customer_final_quote_from_list(
+    list_path: str | Path,
+    output_path: str | Path,
+    price_book: PriceBook | None = None,
+) -> None:
     source_wb = openpyxl.load_workbook(list_path, data_only=False)
     try:
         source_ws = _select_list_sheet(source_wb)
         data = _project_data_from_list_sheet(source_ws)
-        write_customer_final_quote_workbook(data, output_path)
+        write_customer_final_quote_workbook(data, output_path, price_book)
     finally:
         source_wb.close()
 
@@ -1180,10 +1205,11 @@ def run(args: argparse.Namespace) -> list[Path]:
     if quote_input is not None:
         path = output_dir / "报价文档.xlsx"
         quote_style = getattr(args, "quote_style", "reference")
+        price_book = load_prices(args.price) if quote_style == "customer-final" and getattr(args, "price", "") else None
         if quote_style == "customer-final" and project_data is not None:
-            write_customer_final_quote_workbook(project_data, path)
+            write_customer_final_quote_workbook(project_data, path, price_book)
         elif quote_style == "customer-final":
-            write_customer_final_quote_from_list(quote_input, path)
+            write_customer_final_quote_from_list(quote_input, path, price_book)
         else:
             write_quote_workbook(quote_input, args.price, path, tag=args.tag)
         written.append(path)
