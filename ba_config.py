@@ -526,21 +526,33 @@ class PointWorkbookParser:
         end_row = (self.interface_start or self.total_row or self.formula_ws.max_row + 1) - 1
         current_name = ""
         current_stats: list[tuple[int, dict[str, float]]] = []
-        accumulated = {key: 0.0 for key in ("DO", "AO", "DI", "AI")}
+        accumulated_chunks: list[dict[str, float]] = []
+        current_chunk = {key: 0.0 for key in ("DO", "AO", "DI", "AI")}
+
+        def flush_chunk() -> None:
+            nonlocal current_chunk
+            if sum(current_chunk.values()) > 0:
+                accumulated_chunks.append(dict(current_chunk))
+                current_chunk = {key: 0.0 for key in ("DO", "AO", "DI", "AI")}
 
         def flush() -> None:
-            nonlocal current_name, current_stats, accumulated
+            nonlocal current_name, current_stats, accumulated_chunks, current_chunk
             if not current_name:
                 return
+            flush_chunk()
             if current_stats:
                 count = len(current_stats)
                 for index, (row, demand) in enumerate(current_stats):
                     suffix = "" if count == 1 else chr(ord("A") + index)
                     configs.append(self._config_for_stat(row, f"{current_name}{suffix}统计", demand))
-            elif sum(accumulated.values()) > 0:
-                configs.append(self._config_for_stat(0, f"{current_name}统计", dict(accumulated)))
+            elif accumulated_chunks:
+                count = len(accumulated_chunks)
+                for index, demand in enumerate(accumulated_chunks):
+                    suffix = "" if count == 1 else chr(ord("A") + index)
+                    configs.append(self._config_for_stat(0, f"{current_name}{suffix}统计", demand))
             current_stats = []
-            accumulated = {key: 0.0 for key in ("DO", "AO", "DI", "AI")}
+            accumulated_chunks = []
+            current_chunk = {key: 0.0 for key in ("DO", "AO", "DI", "AI")}
 
         for row in range(self.header_row + 1, end_row + 1):
             name = _text(self.formula_ws.cell(row, self.name_col).value)
@@ -563,8 +575,10 @@ class PointWorkbookParser:
                 continue
             if name:
                 demand = self._row_demand(row)
-                for key in accumulated:
-                    accumulated[key] += demand.get(key, 0)
+                for key in current_chunk:
+                    current_chunk[key] += demand.get(key, 0)
+            elif sum(current_chunk.values()) > 0 and sum(self._row_demand(row).values()) <= 0:
+                flush_chunk()
         flush()
         return configs
 
