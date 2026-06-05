@@ -1070,17 +1070,57 @@ def write_customer_final_quote_workbook(
     price_book: PriceBook | None = None,
     sensor_tag: str = "国产",
 ) -> None:
+    gateway_price, item_prices, interface_price = _customer_final_quote_prices(price_book)
     wb = Workbook()
     ws = wb.active
     ws.title = "报价文档"
-    ws.merge_cells("A1:I1")
+    ws.merge_cells("A1:E1")
     ws.cell(1, 1).value = "BA系统"
-    ws.append(CUSTOMER_QUOTE_HEADERS)
-    _write_customer_final_rows(ws, data, price_book, sensor_tag, include_prices=True)
-    total_row = ws.max_row + 3
+    ws.append(["序号", "项目名称", "数量", "单价", "总价"])
+
+    row = 3
+    ws.cell(row, 2).value = "中央管理软件"
+    row += 1
+    ws.append([1, "总点数=(点位表DO+AO+DI+AI)*1.8+接口*数量*200", _intish(data.software_points), None, f"=D{row}*C{row}"])
+
+    row += 1
+    ws.cell(row, 2).value = "接口"
+    seq = 2
+    row += 1
+    for name, qty in data.interfaces:
+        ws.append([seq, name, _intish(qty), _intish(interface_price), None])
+        seq += 1
+        row += 1
+    ws.append([seq, "网关接口", _intish(data.gateway_quantity), _intish(gateway_price), f"=D{row}*C{row}"])
+    seq += 1
+
+    row += 1
+    ws.cell(row, 2).value = "模块&箱体"
+    row += 1
+    modules = data.module_totals
+    boxes = data.box_totals
+    for key, _product, _model in MODULE_ROWS:
+        price = item_prices[key]
+        ws.append([seq, key, _intish(modules.get(key, 0)), price, f"=D{row}*C{row}"])
+        seq += 1
+        row += 1
+    for key, product, model in BOX_ROWS:
+        price = item_prices[key]
+        ws.append([seq, f"{product} {model}", _intish(boxes.get(key, 0)), price, f"=D{row}*C{row}"])
+        seq += 1
+        row += 1
+
+    ws.cell(row, 2).value = "传感器"
+    row += 1
+    for name, qty in data.sensors:
+        ws.append([seq, name, _intish(qty), None, f"=D{row}*C{row}"])
+        seq += 1
+        row += 1
+
+    total_row = row + 3
     ws.cell(total_row, 2).value = "设备总计(RMB)"
-    ws.cell(total_row, 9).value = f"=SUM(I4:I{total_row - 1})"
-    _style_basic_table(ws, max_row=total_row, max_col=9)
+    ws.cell(total_row, 5).value = f"=SUM(E4:E{total_row - 1})"
+    _style_basic_table(ws, max_row=total_row, max_col=5)
     _save_workbook(wb, path)
 
 
