@@ -92,6 +92,8 @@ DDC_HEADERS = [
 ]
 
 LIST_HEADERS = ["序号", "产品名称", "品牌", "型号", "技术规格", "数量", "含税单价", "含税总价"]
+CUSTOMER_LIST_HEADERS = ["序号", "项目名称", "品牌", "型号", "技术规格", "单位", "数量"]
+CUSTOMER_QUOTE_HEADERS = CUSTOMER_LIST_HEADERS + ["单价", "总价"]
 EXTRA_SENSOR_HEADERS = {"风道CO2", "室内CO2浓度"}
 SENSOR_PRICE_PRODUCT_ALIASES = {
     "初效滤网过滤": "空气压差开关",
@@ -853,6 +855,195 @@ def write_list_workbook(data: ProjectData, path: str | Path) -> None:
     _save_workbook(wb, path)
 
 
+def _price_meta(
+    price_book: PriceBook | None,
+    tag: str,
+    fallback_product: str,
+    fallback_model: str | None = None,
+    fallback_spec: str | None = None,
+) -> tuple[str, str | None, str | None, str | None]:
+    row = price_book.by_tag.get(tag) if price_book is not None else None
+    if row is None:
+        return fallback_product, None, fallback_model, fallback_spec
+    return row.product, row.brand, row.model, row.spec
+
+
+def _sensor_meta(
+    price_book: PriceBook | None,
+    product: str,
+    preferred_tag: str,
+) -> tuple[str, str | None, str | None, str | None]:
+    row = price_book.sensor(product, preferred_tag) if price_book is not None else None
+    if row is None:
+        return product, None, None, None
+    return row.product, row.brand, row.model, row.spec
+
+
+def _append_section(ws, title: str) -> None:
+    ws.append([None, title])
+
+
+def _append_customer_list_row(
+    ws,
+    seq: int,
+    product: str,
+    brand: str | None,
+    model: str | None,
+    spec: str | None,
+    unit: str,
+    qty: float | int | None,
+) -> None:
+    ws.append([seq, product, brand, model, spec, unit, _intish(qty)])
+
+
+def _append_customer_quote_row(
+    ws,
+    seq: int,
+    product: str,
+    brand: str | None,
+    model: str | None,
+    spec: str | None,
+    unit: str,
+    qty: float | int | None,
+    unit_price: float | int | None = None,
+    include_total: bool = False,
+) -> None:
+    row = ws.max_row + 1
+    price_value = _intish(unit_price) if unit_price is not None else None
+    total_formula = f"=H{row}*G{row}" if include_total else None
+    ws.append([seq, product, brand, model, spec, unit, _intish(qty), price_value, total_formula])
+
+
+def _write_customer_final_rows(
+    ws,
+    data: ProjectData,
+    price_book: PriceBook | None,
+    sensor_tag: str,
+    include_prices: bool,
+) -> None:
+    gateway_price, item_prices, interface_price = _customer_final_quote_prices(price_book)
+
+    _append_section(ws, "中央管理软件")
+    product, brand, model, spec = _price_meta(price_book, data.software_tag, data.software_tag)
+    seq = 1
+    if include_prices:
+        _append_customer_quote_row(ws, seq, product, brand, model, spec, "套", 1)
+    else:
+        _append_customer_list_row(ws, seq, product, brand, model, spec, "套", 1)
+    seq += 1
+
+    _append_section(ws, "接口")
+    _, interface_brand, interface_model, interface_spec = _price_meta(price_book, "接口", "接口")
+    for name, qty in data.interfaces:
+        if include_prices:
+            _append_customer_quote_row(
+                ws,
+                seq,
+                name,
+                interface_brand,
+                interface_model,
+                interface_spec,
+                "套",
+                qty,
+                interface_price,
+            )
+        else:
+            _append_customer_list_row(ws, seq, name, interface_brand, interface_model, interface_spec, "套", qty)
+        seq += 1
+    gateway_product, gateway_brand, gateway_model, gateway_spec = _price_meta(price_book, "网关", "通讯网关")
+    if include_prices:
+        _append_customer_quote_row(
+            ws,
+            seq,
+            gateway_product,
+            gateway_brand,
+            gateway_model,
+            gateway_spec,
+            "套",
+            data.gateway_quantity,
+            gateway_price,
+            include_total=True,
+        )
+    else:
+        _append_customer_list_row(
+            ws,
+            seq,
+            gateway_product,
+            gateway_brand,
+            gateway_model,
+            gateway_spec,
+            "套",
+            data.gateway_quantity,
+        )
+    seq += 1
+
+    _append_section(ws, "模块&箱体")
+    modules = data.module_totals
+    boxes = data.box_totals
+    for key, fallback_product, fallback_model in MODULE_ROWS:
+        product, brand, model, spec = _price_meta(price_book, key, fallback_product, fallback_model)
+        if include_prices:
+            _append_customer_quote_row(
+                ws,
+                seq,
+                product,
+                brand,
+                model,
+                spec,
+                "个",
+                modules.get(key, 0),
+                item_prices[key],
+                include_total=True,
+            )
+        else:
+            _append_customer_list_row(ws, seq, product, brand, model, spec, "个", modules.get(key, 0))
+        seq += 1
+    for key, fallback_product, fallback_model in BOX_ROWS:
+        product, brand, model, spec = _price_meta(price_book, key, fallback_product, fallback_model)
+        if include_prices:
+            _append_customer_quote_row(
+                ws,
+                seq,
+                product,
+                brand,
+                model,
+                spec,
+                "个",
+                boxes.get(key, 0),
+                item_prices[key],
+                include_total=True,
+            )
+        else:
+            _append_customer_list_row(ws, seq, product, brand, model, spec, "个", boxes.get(key, 0))
+        seq += 1
+
+    _append_section(ws, "传感器")
+    for name, qty in data.sensors:
+        product, brand, model, spec = _sensor_meta(price_book, name, sensor_tag)
+        if include_prices:
+            _append_customer_quote_row(ws, seq, product, brand, model, spec, "个", qty)
+        else:
+            _append_customer_list_row(ws, seq, product, brand, model, spec, "个", qty)
+        seq += 1
+
+
+def write_customer_final_list_workbook(
+    data: ProjectData,
+    path: str | Path,
+    price_book: PriceBook | None = None,
+    sensor_tag: str = "国产",
+) -> None:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "清单文档"
+    ws.merge_cells("A1:G1")
+    ws.cell(1, 1).value = "BA系统"
+    ws.append(CUSTOMER_LIST_HEADERS)
+    _write_customer_final_rows(ws, data, price_book, sensor_tag, include_prices=False)
+    _style_basic_table(ws, max_row=ws.max_row, max_col=7)
+    _save_workbook(wb, path)
+
+
 def _customer_final_quote_prices(price_book: PriceBook | None) -> tuple[float, dict[str, float], float]:
     gateway_price = CUSTOMER_FINAL_GATEWAY_PRICE
     interface_price = CUSTOMER_FINAL_GATEWAY_PRICE
@@ -873,58 +1064,23 @@ def _customer_final_quote_prices(price_book: PriceBook | None) -> tuple[float, d
     return gateway_price, item_prices, interface_price
 
 
-def write_customer_final_quote_workbook(data: ProjectData, path: str | Path, price_book: PriceBook | None = None) -> None:
-    gateway_price, item_prices, interface_price = _customer_final_quote_prices(price_book)
+def write_customer_final_quote_workbook(
+    data: ProjectData,
+    path: str | Path,
+    price_book: PriceBook | None = None,
+    sensor_tag: str = "国产",
+) -> None:
     wb = Workbook()
     ws = wb.active
     ws.title = "报价文档"
-    ws.merge_cells("A1:E1")
+    ws.merge_cells("A1:I1")
     ws.cell(1, 1).value = "BA系统"
-    ws.append(["序号", "项目名称", "数量", "单价", "总价"])
-
-    row = 3
-    ws.cell(row, 2).value = "中央管理软件"
-    row += 1
-    ws.append([1, "总点数=(点位表DO+AO+DI+AI)*1.8+接口*数量*200", _intish(data.software_points), None, f"=D{row}*C{row}"])
-
-    row += 1
-    ws.cell(row, 2).value = "接口"
-    seq = 2
-    row += 1
-    for name, qty in data.interfaces:
-        ws.append([seq, name, _intish(qty), _intish(interface_price), None])
-        seq += 1
-        row += 1
-    ws.append([seq, "网关接口", _intish(data.gateway_quantity), _intish(gateway_price), f"=D{row}*C{row}"])
-    seq += 1
-
-    row += 1
-    ws.cell(row, 2).value = "模块&箱体"
-    row += 1
-    modules = data.module_totals
-    boxes = data.box_totals
-    for key, _product, _model in MODULE_ROWS:
-        price = item_prices[key]
-        ws.append([seq, key, _intish(modules.get(key, 0)), price, f"=D{row}*C{row}"])
-        seq += 1
-        row += 1
-    for key, product, model in BOX_ROWS:
-        price = item_prices[key]
-        ws.append([seq, f"{product} {model}", _intish(boxes.get(key, 0)), price, f"=D{row}*C{row}"])
-        seq += 1
-        row += 1
-
-    ws.cell(row, 2).value = "传感器"
-    row += 1
-    for name, qty in data.sensors:
-        ws.append([seq, name, _intish(qty), None, f"=D{row}*C{row}"])
-        seq += 1
-        row += 1
-
-    total_row = row + 3
+    ws.append(CUSTOMER_QUOTE_HEADERS)
+    _write_customer_final_rows(ws, data, price_book, sensor_tag, include_prices=True)
+    total_row = ws.max_row + 3
     ws.cell(total_row, 2).value = "设备总计(RMB)"
-    ws.cell(total_row, 5).value = f"=SUM(E4:E{total_row - 1})"
-    _style_basic_table(ws, max_row=total_row, max_col=5)
+    ws.cell(total_row, 9).value = f"=SUM(I4:I{total_row - 1})"
+    _style_basic_table(ws, max_row=total_row, max_col=9)
     _save_workbook(wb, path)
 
 
@@ -932,12 +1088,13 @@ def write_customer_final_quote_from_list(
     list_path: str | Path,
     output_path: str | Path,
     price_book: PriceBook | None = None,
+    sensor_tag: str = "国产",
 ) -> None:
     source_wb = openpyxl.load_workbook(list_path, data_only=False)
     try:
         source_ws = _select_list_sheet(source_wb)
         data = _project_data_from_list_sheet(source_ws)
-        write_customer_final_quote_workbook(data, output_path, price_book)
+        write_customer_final_quote_workbook(data, output_path, price_book, sensor_tag)
     finally:
         source_wb.close()
 
@@ -948,19 +1105,29 @@ def _project_data_from_list_sheet(ws) -> ProjectData:
     sensors: list[tuple[str, float]] = []
     modules = {key: 0 for key in MODULES}
     boxes = {key: 0 for key, _product, _model in BOX_ROWS}
+    header_map = {_text(ws.cell(2, col).value): col for col in range(1, ws.max_column + 1)}
+    qty_col = header_map.get("数量", 6)
+    model_col = header_map.get("型号", 4)
+    section_names = {
+        "软件": "软件",
+        "中央管理软件": "软件",
+        "接口": "接口",
+        "模块&箱体": "模块&箱体",
+        "传感器": "传感器",
+    }
 
     for row in range(1, ws.max_row + 1):
         product = _text(ws.cell(row, 2).value)
-        if product in {"软件", "接口", "模块&箱体", "传感器"}:
-            section = product
+        if product in section_names:
+            section = section_names[product]
             continue
-        qty = _number_or_none(ws.cell(row, 6).value)
+        qty = _number_or_none(ws.cell(row, qty_col).value)
         if qty is None:
             continue
         if section == "接口" and "网关" not in product:
             interfaces.append((product, qty))
         elif section == "模块&箱体":
-            tag = _tag_for_module_or_box(ws.cell(row, 4).value)
+            tag = _tag_for_module_or_box(ws.cell(row, model_col).value)
             if tag in modules:
                 modules[tag] += int(round(qty))
             elif tag:
@@ -1170,6 +1337,20 @@ def _style_basic_table(ws, max_row: int, max_col: int) -> None:
         widths = {"A": 8, "B": 34, "C": 14, "D": 24, "E": 54, "F": 10, "G": 14, "H": 16}
         for col, width in widths.items():
             ws.column_dimensions[col].width = width
+    elif max_col == 7:
+        for col in range(1, 8):
+            ws.cell(2, col).font = Font(bold=True)
+            ws.cell(2, col).fill = PatternFill("solid", fgColor="D9EAF7")
+        widths = {"A": 8, "B": 34, "C": 14, "D": 24, "E": 54, "F": 10, "G": 12}
+        for col, width in widths.items():
+            ws.column_dimensions[col].width = width
+    elif max_col == 9:
+        for col in range(1, 10):
+            ws.cell(2, col).font = Font(bold=True)
+            ws.cell(2, col).fill = PatternFill("solid", fgColor="D9EAF7")
+        widths = {"A": 8, "B": 34, "C": 14, "D": 24, "E": 54, "F": 10, "G": 12, "H": 14, "I": 16}
+        for col, width in widths.items():
+            ws.column_dimensions[col].width = width
     elif max_col == 5:
         for col in range(1, 6):
             ws.cell(2, col).font = Font(bold=True)
@@ -1193,6 +1374,9 @@ def run(args: argparse.Namespace) -> list[Path]:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
+    quote_style = getattr(args, "quote_style", "reference")
+    price_book = load_prices(args.price) if quote_style == "customer-final" and getattr(args, "price", "") else None
+    sensor_tag = getattr(args, "tag", "国产")
 
     project_data: ProjectData | None = None
     if args.mode in {"ddc", "list", "config", "all"}:
@@ -1207,7 +1391,10 @@ def run(args: argparse.Namespace) -> list[Path]:
     list_path = output_dir / "清单文档.xlsx"
     if args.mode in {"list", "config", "all"}:
         assert project_data is not None
-        write_list_workbook(project_data, list_path)
+        if quote_style == "customer-final":
+            write_customer_final_list_workbook(project_data, list_path, price_book, sensor_tag)
+        else:
+            write_list_workbook(project_data, list_path)
         written.append(list_path)
 
     if args.mode == "quote":
@@ -1218,12 +1405,10 @@ def run(args: argparse.Namespace) -> list[Path]:
         quote_input = None
     if quote_input is not None:
         path = output_dir / "报价文档.xlsx"
-        quote_style = getattr(args, "quote_style", "reference")
-        price_book = load_prices(args.price) if quote_style == "customer-final" and getattr(args, "price", "") else None
         if quote_style == "customer-final" and project_data is not None:
-            write_customer_final_quote_workbook(project_data, path, price_book)
+            write_customer_final_quote_workbook(project_data, path, price_book, sensor_tag)
         elif quote_style == "customer-final":
-            write_customer_final_quote_from_list(quote_input, path, price_book)
+            write_customer_final_quote_from_list(quote_input, path, price_book, sensor_tag)
         else:
             write_quote_workbook(quote_input, args.price, path, tag=args.tag)
         written.append(path)
