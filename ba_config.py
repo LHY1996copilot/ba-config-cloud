@@ -1358,46 +1358,153 @@ def _tag_for_module_or_box(model: Any) -> str:
     }.get(dim, "")
 
 
+def _fill(color: str) -> PatternFill:
+    return PatternFill("solid", fgColor=color)
+
+
+def _is_section_row(ws, row: int, max_col: int) -> bool:
+    label = _text(ws.cell(row, 2).value)
+    if label in {"软件", "中央管理软件", "接口", "模块&箱体", "传感器"}:
+        return all(not _text(ws.cell(row, col).value) for col in range(1, max_col + 1) if col != 2)
+    if max_col == 12:
+        first = _text(ws.cell(row, 1).value)
+        return bool(first) and first not in {"小计", "总计"} and all(
+            not _text(ws.cell(row, col).value) for col in range(2, max_col + 1)
+        )
+    return False
+
+
+def _is_total_row(ws, row: int) -> bool:
+    return _text(ws.cell(row, 1).value) in {"小计", "总计"} or _text(ws.cell(row, 2).value) in {
+        "总计",
+        "设备总计(RMB)",
+    }
+
+
+def _style_title_row(ws, max_col: int) -> None:
+    if not _text(ws.cell(1, 1).value):
+        ws.cell(1, 1).value = ws.title
+    if not any(merged.min_row == 1 and merged.max_row == 1 for merged in ws.merged_cells.ranges):
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max_col)
+    for col in range(1, max_col + 1):
+        cell = ws.cell(1, col)
+        cell.fill = _fill("FF111827")
+        cell.font = Font(name="Microsoft YaHei", size=16, bold=True, color="FFFFFFFF")
+        cell.alignment = Alignment(horizontal="left", vertical="center")
+    ws.row_dimensions[1].height = 30
+
+
+def _style_header_row(ws, header_row: int, max_col: int) -> None:
+    for col in range(1, max_col + 1):
+        cell = ws.cell(header_row, col)
+        cell.fill = _fill("FF1F2937")
+        cell.font = Font(name="Microsoft YaHei", size=10, bold=True, color="FFFFFFFF")
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = Border(bottom=Side(style="medium", color="FF111827"))
+    ws.row_dimensions[header_row].height = 24
+
+
+def _style_section_row(ws, row: int, max_col: int) -> None:
+    for col in range(1, max_col + 1):
+        cell = ws.cell(row, col)
+        cell.fill = _fill("FFF3F4F6")
+        cell.font = Font(name="Microsoft YaHei", size=10, bold=True, color="FF111827")
+        cell.border = Border(
+            top=Side(style="thin", color="FFD1D5DB"),
+            bottom=Side(style="thin", color="FFD1D5DB"),
+        )
+        cell.alignment = Alignment(vertical="center", wrap_text=True)
+    ws.row_dimensions[row].height = 22
+
+
+def _style_total_row(ws, row: int, max_col: int) -> None:
+    for col in range(1, max_col + 1):
+        cell = ws.cell(row, col)
+        cell.fill = _fill("FF111827")
+        cell.font = Font(name="Microsoft YaHei", size=10, bold=True, color="FFFFFFFF")
+        cell.border = Border(top=Side(style="medium", color="FF111827"))
+        cell.alignment = Alignment(horizontal="right" if col >= max_col - 1 else "left", vertical="center")
+    ws.row_dimensions[row].height = 25
+
+
+def _style_numeric_columns(ws, max_row: int, max_col: int) -> None:
+    if max_col == 5:
+        qty_cols, money_cols = {3}, {4, 5}
+    elif max_col == 7:
+        qty_cols, money_cols = {7}, set()
+    elif max_col == 8:
+        qty_cols, money_cols = {6}, {7, 8}
+    elif max_col == 9:
+        qty_cols, money_cols = {7}, {8, 9}
+    elif max_col == 12:
+        qty_cols, money_cols = set(range(2, 13)), set()
+    else:
+        qty_cols, money_cols = set(), set()
+
+    for row in range(3, max_row + 1):
+        for col in qty_cols:
+            cell = ws.cell(row, col)
+            cell.number_format = "#,##0.##"
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        for col in money_cols:
+            cell = ws.cell(row, col)
+            cell.number_format = "¥#,##0"
+            cell.alignment = Alignment(horizontal="right", vertical="center", wrap_text=True)
+
+
 def _style_basic_table(ws, max_row: int, max_col: int) -> None:
-    thin = Side(style="thin", color="D9E1E5")
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    header_row = 4 if max_col == 12 else 2
+    last_col = get_column_letter(max_col)
+    light_border = Border(bottom=Side(style="thin", color="FFE5E7EB"))
+
+    _style_title_row(ws, max_col)
+    _style_header_row(ws, header_row, max_col)
+    ws.sheet_view.showGridLines = False
+    ws.freeze_panes = f"A{header_row + 1}"
+    ws.auto_filter.ref = f"A{header_row}:{last_col}{header_row}"
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_setup.orientation = "landscape" if max_col >= 8 else "portrait"
+    ws.page_margins.left = 0.25
+    ws.page_margins.right = 0.25
+    ws.page_margins.top = 0.45
+    ws.page_margins.bottom = 0.45
+    ws.print_title_rows = f"$1:${header_row}"
+
     for row in range(1, max_row + 1):
+        if row in {1, header_row}:
+            continue
+        if _is_total_row(ws, row):
+            _style_total_row(ws, row, max_col)
+            continue
+        if _is_section_row(ws, row, max_col):
+            _style_section_row(ws, row, max_col)
+            continue
         for col in range(1, max_col + 1):
             cell = ws.cell(row, col)
-            cell.border = border
+            if row > header_row and row % 2 == 0:
+                cell.fill = _fill("FFFAFAFA")
+            cell.font = Font(name="Microsoft YaHei", size=10, color="FF111827")
+            cell.border = light_border
             cell.alignment = Alignment(vertical="center", wrap_text=True)
-    for row in (2, 4):
-        if row <= max_row:
-            for col in range(1, max_col + 1):
-                ws.cell(row, col).font = Font(bold=True)
+
+    _style_numeric_columns(ws, max_row, max_col)
+
     if max_col == 8:
-        for col in range(1, 9):
-            ws.cell(2, col).font = Font(bold=True)
-            ws.cell(2, col).fill = PatternFill("solid", fgColor="D9EAF7")
         widths = {"A": 8, "B": 34, "C": 14, "D": 24, "E": 54, "F": 10, "G": 14, "H": 16}
-        for col, width in widths.items():
-            ws.column_dimensions[col].width = width
     elif max_col == 7:
-        for col in range(1, 8):
-            ws.cell(2, col).font = Font(bold=True)
-            ws.cell(2, col).fill = PatternFill("solid", fgColor="D9EAF7")
         widths = {"A": 8, "B": 34, "C": 14, "D": 24, "E": 54, "F": 10, "G": 12}
-        for col, width in widths.items():
-            ws.column_dimensions[col].width = width
     elif max_col == 9:
-        for col in range(1, 10):
-            ws.cell(2, col).font = Font(bold=True)
-            ws.cell(2, col).fill = PatternFill("solid", fgColor="D9EAF7")
         widths = {"A": 8, "B": 34, "C": 14, "D": 24, "E": 54, "F": 10, "G": 12, "H": 14, "I": 16}
-        for col, width in widths.items():
-            ws.column_dimensions[col].width = width
     elif max_col == 5:
-        for col in range(1, 6):
-            ws.cell(2, col).font = Font(bold=True)
-            ws.cell(2, col).fill = PatternFill("solid", fgColor="D9EAF7")
-        widths = {"A": 8, "B": 58, "C": 12, "D": 12, "E": 14}
-        for col, width in widths.items():
-            ws.column_dimensions[col].width = width
+        widths = {"A": 8, "B": 58, "C": 12, "D": 14, "E": 16}
+    elif max_col == 12:
+        widths = {"A": 28, **{get_column_letter(col): 18 for col in range(2, 13)}}
+    else:
+        widths = {}
+    for col, width in widths.items():
+        ws.column_dimensions[col].width = width
 
 
 def _save_workbook(wb: Workbook, path: str | Path) -> None:
